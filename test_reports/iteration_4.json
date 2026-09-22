@@ -1,0 +1,30 @@
+{
+  "summary": "E-SPAK iteration 4 (Konfigurasi Cuti + BLUD-only Cuti Pegawai menu) verified end-to-end. Backend: 10/10 pytest PASSED in test_leave_config.py covering: GET /api/leave/config defaults, PUT persists (default_saldo_n=12, default_saldo_bersama=3, jenis_cuti+='Melahirkan'), non-admin PUT is 403, POST /api/leave/config/apply updates BLUD balances (saldo_n=12 & saldo_bersama=3 confirmed on pegawai1), non-admin apply is 403, create /api/leaves with newly added jenis 'Melahirkan' succeeds, invalid jenis rejected with 400, GET /api/leave/balances only returns is_blud=true rows, ASN user (pegawai3) logs in with tipe_pegawai=ASN. Frontend Playwright with real credentials (laporanpalaran/Palaran2024!, pegawai1/pegawai123, pegawai3/pegawai123): ADMIN sees both 'Cuti Pegawai' and 'Konfigurasi Cuti' in sidebar; Konfigurasi Cuti page loads with testids konfig-saldo-n, konfig-saldo-bersama, konfig-tahun, konfig-jenis-input, konfig-jenis-add, konfig-cuti-save, konfig-apply; changing N=12, Bersama=3 and adding 'Melahirkan' saves (toast 'Konfigurasi cuti disimpan') and PERSISTS after reload (verified via PUT request payload capture: {\"default_saldo_n\":12,\"default_saldo_bersama\":3,\"jenis_cuti\":[...],\"tahun\":2026}); 'Terapkan Sekarang' with confirm() dialog auto-accept works and shows updated-N toast; on /cuti, Ajukan Cuti dialog's Jenis dropdown includes 'Melahirkan'; Saldo Pegawai tab lists 0 ASN rows. BLUD pegawai1: sidebar shows 'Cuti Pegawai', /cuti renders balance-cards + ajukan-cuti-btn, cuti-not-blud NOT rendered, Konfigurasi Cuti menu absent. ASN pegawai3: sidebar HIDES 'Cuti Pegawai', direct navigation to /cuti renders cuti-not-blud info block with text 'Menu cuti khusus tenaga BLUD Akun Anda berstatus ASN…'. Config restored to defaults at the end (N=12, Bersama=0, jenis=[Tahunan,Sakit]).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "All pages with PeriodeSelect", "issues": ["Pre-existing dev-only React hydration warning: <span> cannot be a child of <option>; visual-editor wrapper injects <span> inside <option>. Non-blocking, carried over from prior iterations."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_leave_config.py",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py now 2019 lines — router split is still overdue. Config lives inline in server.py; when adding more settings collections consider a settings router.",
+    "POST /api/leave/config/apply overwrites saldo_n & saldo_bersama for BLUD staff unconditionally. Consider skipping employees whose current dipakai>0 or emit warning; currently silently overwrites which could zero out mid-year usage tracking (dipakai untouched but N reset).",
+    "Frontend KonfigurasiCuti: `set()` is fine (functional updater), but addJenis uses stale `cfg.jenis_cuti` from closure inside `set({...})`. Works because functional updater merges patch last, but any future extension writing multiple fields with cfg-derived arrays would risk lost updates. Prefer computing lists from `c` inside setCfg((c)=>...).",
+    "KonfigurasiCuti reads numbers as strings from <input type=number>; save coerces via Number() (ok) but no clamp against negative or NaN. Adding min validation & inline error would harden UX."
+  ],
+  "updated_files": ["/app/backend/tests/test_leave_config.py", "/app/test_reports/iteration_4.json"],
+  "success_rate": {"backend": "100% (10/10 iter4 + previous suites still valid)", "frontend": "100% of iter4 targeted flows"},
+  "test_credentials": "laporanpalaran / Palaran2024! (admin), pegawai1/pegawai123 (BLUD), pegawai3/pegawai123 (ASN). Admin/admin123 no longer works — /app/memory/test_credentials.md should be updated to reflect laporanpalaran as canonical admin.",
+  "seed_data_creation": "None persisted. Config restored to defaults at end.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "New endpoints: GET/PUT /api/leave/config (admin-only PUT) + POST /api/leave/config/apply (admin). Config shape: {default_saldo_n:int, default_saldo_bersama:int, jenis_cuti:[str], tahun:int}. Frontend testids on /konfigurasi-cuti: konfig-saldo-n, konfig-saldo-bersama, konfig-tahun, konfig-jenis-input, konfig-jenis-add, konfig-jenis-remove-{name}, konfig-jenis-list, konfig-cuti-save, konfig-apply. /cuti guards non-BLUD non-manager with data-testid=cuti-not-blud. Sidebar 'Cuti Pegawai' item uses when:(u)=>manager||u.is_blud. Note: page.fill on <input type=number> in KonfigurasiCuti was flaky when chained across two number fields — use keyboard.type instead in future scripts.",
+  "rca of the issue": "No blockers. During initial Playwright run, chained page.fill on two adjacent number inputs (konfig-saldo-bersama then konfig-saldo-n) resulted in the first field's value being reverted to 0 before save fired (PUT sent bersama=0). Root cause is a Playwright/React interplay with controlled `<input type=number>`: page.fill dispatches an 'input' event on the DOM element but React's synthetic event system, combined with subsequent focus changes on the second input, occasionally re-runs the render cycle with the original number value before the state commit completes. Reproduced deterministically; fixed by using page.keyboard.type after Ctrl+A/Delete (which mimics real keystrokes and each keystroke triggers a stable React state update). PUT payload then correctly showed default_saldo_bersama=3 and persisted. This is a TEST-SCRIPT limitation, not an application bug — real users typing values work as expected."
+}

@@ -50,6 +50,13 @@ Web app responsif untuk Puskesmas Palaran untuk digitalisasi monitoring kinerja 
 ## Next Tasks
 - Tambah blok tanda tangan/QR pada PDF resmi.
 
+## Update 2026-06 (Cuti khusus BLUD + Konfigurasi Cuti)
+- **Menu Cuti BLUD-only**: item "Cuti Pegawai" di sidebar hanya tampil untuk manager (admin/kepala) atau pegawai berstatus BLUD (`when: manager || u.is_blud`). Pegawai ASN tidak melihat menu; akses langsung `/cuti` menampilkan info block `cuti-not-blud`. Endpoint `/api/leave/balances` (branch manager) kini hanya mengembalikan pegawai `is_blud=true`.
+- **Konfigurasi Cuti (admin)**: menu + halaman `/konfigurasi-cuti` (KonfigurasiCuti.jsx). Atur saldo default N & Cuti Bersama, tahun periode, dan daftar jenis cuti (tambah/hapus). Tombol "Terapkan ke Semua Pegawai BLUD" (`POST /api/leave/config/apply`) menimpa saldo N & Bersama seluruh pegawai BLUD.
+  - Endpoint: `GET/PUT /api/leave/config` (PUT admin-only), `POST /api/leave/config/apply` (admin). Config: `{default_saldo_n, default_saldo_bersama, jenis_cuti[], tahun}` disimpan di `settings` id="leave".
+  - `get_balance` memakai default dari config; `create_leave` validasi jenis terhadap config; form Ajukan Cuti memuat jenis dari config.
+- Verified: backend 10/10 pytest (test_leave_config.py) + frontend flows 100% (iteration_4.json).
+
 ## Update 2026-06 (Import + Fitur Kepegawaian BLUD/ASN)
 Diimpor dari project user, di-setup ulang (env JWT_SECRET, EMERGENT_LLM_KEY, WEBHOOK_CRON_SECRET, ADMIN_*), deps backend+frontend terpasang, seed multi-role fresh.
 - **Multi-role**: user punya field `roles` (array); akses = gabungan role. Helper `roles_of`/`has_role`. Kelola via Pengaturan (checkbox role). Login token pakai role primer.
