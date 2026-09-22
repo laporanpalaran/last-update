@@ -1,0 +1,25 @@
+{
+  "summary": "E-SPAK new features testing (multi-role, Cuti Pegawai, SIP + Monitoring SIP). Backend: 10/10 pytest tests PASSED in new /app/backend/tests/test_leave_sip.py — covers multi-role user create/login/update, leave balances list/my-balance, priority deduction (Bersama → N-2 → N-1 → N verified with 3-day Tahunan against Bersama=3/N2=5/N1=5/N=5 → Bersama becomes 0, rest untouched), cancel/restore balance, PDF generation (%PDF- header), SIP dashboard payload shape, RBAC (admin=200, kepala=200 for dashboard but 403 on verify, pegawai=403 on dashboard), SIP submit → admin verify flow. Frontend (Playwright): all required data-testids present on Cuti/SIP/MonitoringSIP/Pengaturan pages; admin sees nav-cuti-pegawai, nav-sip-saya, nav-monitoring-sip; Cuti page balance cards, 3 tabs, submission dialog with jenis/mulai/selesai/alasan/submit all present; SaldoTab lists 12 BLUD staff each with saldo-edit-*; Kelola tab shows admin-add-cuti and cuti-table with 2 cuti-print-*, 1 cuti-approve-*, 1 cuti-cancel-*; MonitoringSIP shows 5 stat cards (Total 12 / Aktif 8 / Akan Habis 2 / Kadaluarsa 2 / Menunggu 3), distribusi chart, all 4 filters, monitor table. Pengaturan Users add-user modal exposes 4 role checkboxes + BLUD checkbox + submit. RBAC verified end-to-end: pegawai1 does NOT see nav-monitoring-sip, direct visit to /monitoring-sip redirects to /; pegawai1 does NOT see tab-cuti-kelola/tab-cuti-saldo on /cuti (only Cuti Saya). Kepala DOES see nav-monitoring-sip and /monitoring-sip loads with 0 sip-approve-* buttons (verify UI hidden as required).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [
+    {"screen": "Cuti / SIP forms", "issues": ["Custom DatePicker component is used (not native browser picker) — good. No issues observed."]}
+  ]},
+  "test_report_links": [
+    "/app/backend/tests/test_leave_sip.py",
+    "/app/test_reports/pytest/leave_sip_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1785 lines (was 894) — well past the 700-line guideline. Strongly recommend splitting into routers: routers/auth.py, routers/users.py, routers/cuti.py, routers/sip.py, routers/spm.py, etc., before adding more features.",
+    "PUT /api/sip/{id}/verify and PUT /api/leaves/{id}/verify return generic {\"ok\": true} — inconsistent with POST/GET which return full object. Recommend returning updated resource for easier client consumption and testing.",
+    "In Cuti.jsx loadMine filters leaves client-side by employee_id; if a pegawai has many leaves in the org, GET /leaves may return unauthorized rows or leak data. Prefer a dedicated /api/leaves/mine endpoint or server-side filter by role."
+  ],
+  "updated_files": ["/app/backend/tests/test_leave_sip.py"],
+  "success_rate": {"backend": "100% (10/10 new + 23/23 existing untouched)", "frontend": "100% of tested flows (all testids present + RBAC verified)"},
+  "test_credentials": "admin/admin123, kepala/kepala123, pegawai1..10/pegawai123 — all working.",
+  "seed_data_creation": "None new. Seeded 12 saldo cuti + 11 SIP already present. Priority deduction test temporarily sets pegawai1 balances to Bersama=3, N-2=5, N-1=5, N=5 then restores via cancel.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "New endpoints all under /api: /leave/balances, /leave/my-balance, /leave/balances/{empId}, /leaves (GET/POST), /leaves/{id}/verify|cancel|pdf, /sip (GET/POST), /sip/{id} (PUT/DELETE), /sip/{id}/verify, /sip/dashboard. Login body uses key 'identifier' (username or NIP). Multi-role users have array field 'roles'; helper roles_of accepts either 'roles' or legacy 'role'. Priority deduction verified in code path apply_deduction: Bersama → N-2 → N-1 → N.",
+  "rca of the issue": "No blocking issues found. Minor test-code issue in first draft: SIP verify endpoint returns {\"ok\": true} not full object — fixed test to GET-then-assert instead."
+}

@@ -208,6 +208,7 @@ class UserCreate(BaseModel):
     jabatan: Optional[str] = ""
     unit: Optional[str] = ""
     is_blud: Optional[bool] = False
+    tipe_pegawai: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
@@ -220,6 +221,7 @@ class UserUpdate(BaseModel):
     status: Optional[str] = None
     password: Optional[str] = None
     is_blud: Optional[bool] = None
+    tipe_pegawai: Optional[str] = None
 
 
 class VerifyInput(BaseModel):
@@ -381,10 +383,11 @@ async def create_user(data: UserCreate, request: Request, user: dict = Depends(r
         raise HTTPException(status_code=400, detail="Username atau NIP sudah digunakan")
     roles = data.roles or ([data.role] if data.role else ["pegawai"])
     roles = [r for r in roles if r in ALL_ROLES] or ["pegawai"]
+    tipe = data.tipe_pegawai or ("BLUD" if data.is_blud else "ASN")
     doc = {
         "id": str(uuid.uuid4()), "username": data.username, "nip": data.nip or "",
         "password_hash": hash_password(data.password), "nama": data.nama,
-        "role": roles[0], "roles": roles, "is_blud": bool(data.is_blud),
+        "role": roles[0], "roles": roles, "is_blud": tipe == "BLUD", "tipe_pegawai": tipe,
         "jabatan": data.jabatan or "", "unit": data.unit or "", "status": "aktif",
         "created_at": now_iso(), "updated_at": now_iso(),
     }
@@ -405,6 +408,11 @@ async def update_user(user_id: str, data: UserUpdate, request: Request, user: di
         update["roles"] = [data.role]
     if data.password:
         update["password_hash"] = hash_password(data.password)
+    if data.tipe_pegawai is not None:
+        update["tipe_pegawai"] = data.tipe_pegawai
+        update["is_blud"] = data.tipe_pegawai == "BLUD"
+    elif "is_blud" in update:
+        update["tipe_pegawai"] = "BLUD" if update["is_blud"] else "ASN"
     update["updated_at"] = now_iso()
     res = await db.users.update_one({"id": user_id}, {"$set": update})
     if res.matched_count == 0:
@@ -1439,6 +1447,8 @@ async def _leave_with_names(leaves):
         l["employee_nip"] = emp.get("nip", "-")
         l["employee_jabatan"] = emp.get("jabatan", "-")
         l["employee_unit"] = emp.get("unit", "-")
+        l["employee_tipe"] = emp.get("tipe_pegawai", "BLUD" if emp.get("is_blud") else "ASN")
+        l["has_lampiran"] = bool(l.get("lampiran_path"))
         out.append(l)
     return out
 
@@ -1553,44 +1563,116 @@ async def delete_leave(leave_id: str, user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
-def _leave_pdf_bytes(lv: dict, emp: dict) -> bytes:
+def _leave_pdf_bytes(lv: dict, emp: dict, bal: dict, counts: dict) -> bytes:
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20 * mm, bottomMargin=18 * mm, leftMargin=22 * mm, rightMargin=22 * mm)
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=14 * mm, bottomMargin=12 * mm, leftMargin=18 * mm, rightMargin=18 * mm)
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("t", parent=styles["Normal"], alignment=TA_CENTER, fontSize=13, fontName="Helvetica-Bold", spaceAfter=2)
-    sub_style = ParagraphStyle("s", parent=styles["Normal"], alignment=TA_CENTER, fontSize=9, spaceAfter=14)
-    normal = styles["Normal"]
-    labels = {"diajukan": "Diajukan", "disetujui": "Disetujui", "ditolak": "Ditolak", "dibatalkan": "Dibatalkan"}
-    elems = [Paragraph("FORMULIR PERMOHONAN CUTI", title_style),
-             Paragraph("UPTD Puskesmas Palaran", sub_style)]
-    rows = [
-        ["Nama", emp.get("nama", "-")], ["NIP", emp.get("nip", "-")],
-        ["Jabatan / Unit", f"{emp.get('jabatan','-')} / {emp.get('unit','-')}"],
-        ["Jenis Cuti", lv.get("jenis", "-")],
-        ["Tanggal Mulai", lv.get("tanggal_mulai", "-")],
-        ["Tanggal Selesai", lv.get("tanggal_selesai", "-")],
-        ["Jumlah Hari", f"{lv.get('jumlah_hari', 0)} hari"],
-        ["Alasan", lv.get("alasan") or "-"],
-        ["Alamat Selama Cuti", lv.get("alamat") or "-"],
-        ["Status", labels.get(lv.get("status"), lv.get("status", "-"))],
-    ]
-    t = Table([[Paragraph(f"<b>{k}</b>", normal), Paragraph(str(v), normal)] for k, v in rows], colWidths=[55 * mm, 100 * mm])
-    t.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F1F5F9")),
-        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+    norm = ParagraphStyle("n", parent=styles["Normal"], fontSize=8.5, leading=11)
+    normb = ParagraphStyle("nb", parent=norm, fontName="Helvetica-Bold")
+    right = ParagraphStyle("r", parent=norm, alignment=2)
+    center = ParagraphStyle("c", parent=norm, alignment=TA_CENTER)
+    title = ParagraphStyle("t", parent=styles["Normal"], alignment=TA_CENTER, fontSize=12, fontName="Helvetica-Bold")
+    sec = ParagraphStyle("sec", parent=normb, fontSize=8.5, backColor=colors.HexColor("#E2E8F0"))
+    small = ParagraphStyle("sm", parent=norm, fontSize=7)
+
+    def chk(v):
+        return "[ X ]" if v else "[    ]"
+
+    tgl = datetime.now(timezone.utc).strftime("%d %B %Y")
+    jenis = lv.get("jenis", "-")
+    elems = []
+    elems.append(Paragraph(f"Samarinda, {tgl}", right))
+    elems.append(Paragraph("Yth. Wali Kota Samarinda cq<br/>Kepala UPT Puskesmas Palaran<br/>di Tempat", norm))
+    elems.append(Spacer(1, 6))
+    elems.append(Paragraph("FORMULIR PERMINTAAN DAN PEMBERIAN CUTI", title))
+    elems.append(Spacer(1, 8))
+
+    def section(txt):
+        return Paragraph(txt, sec)
+
+    def kv_table(rows, w1=45 * mm):
+        t = Table([[Paragraph(k, norm), Paragraph(str(v), norm)] for k, v in rows], colWidths=[w1, 174 * mm - w1])
+        t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94A3B8")),
+                               ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 3),
+                               ("BOTTOMPADDING", (0, 0), (-1, -1), 3), ("LEFTPADDING", (0, 0), (-1, -1), 5)]))
+        return t
+
+    # I. DATA PEGAWAI
+    elems.append(section("I. DATA PEGAWAI"))
+    elems.append(kv_table([
+        ("Nama", emp.get("nama", "-")), ("NIP", emp.get("nip", "-")),
+        ("Jabatan", emp.get("jabatan", "-")),
+        ("Masa Kerja", emp.get("masa_kerja", "-") or "-"),
+        ("Unit Kerja", emp.get("unit", "-")),
     ]))
-    elems += [t, Spacer(1, 30)]
-    sign = Table([
-        ["Pemohon,", "", "Mengetahui,\nKepala Puskesmas"],
-        ["", "", ""], ["", "", ""],
-        [f"{emp.get('nama','-')}", "", "( ............................ )"],
-        [f"NIP. {emp.get('nip','-')}", "", ""],
-    ], colWidths=[70 * mm, 16 * mm, 70 * mm])
-    sign.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 9), ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    elems.append(sign)
+    elems.append(Spacer(1, 4))
+
+    # II. JENIS CUTI
+    elems.append(section("II. JENIS CUTI YANG DIAMBIL"))
+    all_jenis = ["Tahunan", "Besar", "Sakit", "Bersalin", "Alasan Penting", "Diluar Tanggungan Negara", "Bersama"]
+    jc = []
+    for i, j in enumerate(all_jenis, 1):
+        jc.append(Paragraph(f"{chk(j == jenis)} {i}. Cuti {j}", norm))
+    jt = Table([[jc[0], jc[1]], [jc[2], jc[3]], [jc[4], jc[5]], [jc[6], ""]], colWidths=[87 * mm, 87 * mm])
+    jt.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94A3B8")), ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3), ("LEFTPADDING", (0, 0), (-1, -1), 5)]))
+    elems.append(jt)
+    elems.append(Spacer(1, 4))
+
+    # III. ALASAN CUTI + IV. LAMANYA
+    elems.append(section("III. ALASAN CUTI"))
+    elems.append(kv_table([("Alasan", lv.get("alasan") or "-")]))
+    elems.append(Spacer(1, 4))
+    elems.append(section("IV. LAMANYA CUTI"))
+    elems.append(kv_table([("Selama", f"{lv.get('jumlah_hari', 0)} Hari"),
+                           ("Mulai tanggal", f"{lv.get('tanggal_mulai','-')}  s/d  {lv.get('tanggal_selesai','-')}")]))
+    elems.append(Spacer(1, 4))
+
+    # V. CATATAN CUTI TAHUNAN (SISA SALDO)
+    elems.append(section("V. CATATAN CUTI TAHUNAN (SISA SALDO)"))
+    y = bal.get("tahun", datetime.now(timezone.utc).year)
+    saldo_rows = [
+        [Paragraph("<b>Tahun</b>", small), Paragraph("<b>Sisa</b>", small), Paragraph("<b>Keterangan</b>", small)],
+        [Paragraph(f"N-2 ({y-2})", small), Paragraph(str(bal.get("saldo_n2", 0)), small), Paragraph("Sisa 2 tahun sebelumnya", small)],
+        [Paragraph(f"N-1 ({y-1})", small), Paragraph(str(bal.get("saldo_n1", 0)), small), Paragraph("Sisa 1 tahun sebelumnya", small)],
+        [Paragraph(f"N ({y})", small), Paragraph(str(bal.get("saldo_n", 0)), small), Paragraph("Sisa tahun berjalan", small)],
+        [Paragraph("Cuti Bersama", small), Paragraph(str(bal.get("saldo_bersama", 0)), small), Paragraph("Kuota cuti bersama", small)],
+    ]
+    left_t = Table(saldo_rows, colWidths=[26 * mm, 16 * mm, 45 * mm])
+    left_t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94A3B8")),
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
+                                ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2), ("LEFTPADDING", (0, 0), (-1, -1), 4)]))
+    cnt_list = [("Cuti Tahunan", counts.get("Tahunan", 0)), ("Cuti Besar", 0), ("Cuti Sakit", counts.get("Sakit", 0)),
+                ("Cuti Melahirkan", 0), ("Cuti Karena Alasan Penting", 0), ("Cuti Diluar Tanggungan Negara", 0), ("Cuti Bersama", 0)]
+    cnt_rows = [[Paragraph(f"{i}. {n}", small), Paragraph(f"{v} kali" if v else "-", small)] for i, (n, v) in enumerate(cnt_list, 1)]
+    right_t = Table(cnt_rows, colWidths=[58 * mm, 20 * mm])
+    right_t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94A3B8")), ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2), ("LEFTPADDING", (0, 0), (-1, -1), 4)]))
+    wrap = Table([[left_t, right_t]], colWidths=[87 * mm, 87 * mm])
+    wrap.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    elems.append(wrap)
+    elems.append(Spacer(1, 4))
+
+    # VI. ALAMAT + tanda tangan pemohon
+    elems.append(section("VI. ALAMAT SELAMA MENJALANKAN CUTI"))
+    addr = Table([[Paragraph(f"Alamat: {lv.get('alamat') or '-'}<br/>Telp: {lv.get('telp') or '-'}", norm),
+                   Paragraph(f"Hormat saya,<br/><br/><br/><br/>{emp.get('nama','-')}<br/>NIP. {emp.get('nip','-')}", center)]],
+                 colWidths=[104 * mm, 70 * mm])
+    addr.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94A3B8")), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 4), ("LEFTPADDING", (0, 0), (-1, -1), 5)]))
+    elems.append(addr)
+    elems.append(Spacer(1, 4))
+
+    approved = lv.get("status") == "disetujui"
+    rejected = lv.get("status") == "ditolak"
+    def approval_block(title_txt, checked_approve):
+        opts = Paragraph(f"{chk(checked_approve)} DISETUJUI &nbsp;&nbsp; {chk(False)} PERUBAHAN &nbsp;&nbsp; {chk(False)} DITANGGUHKAN &nbsp;&nbsp; {chk(rejected)} TIDAK DISETUJUI", norm)
+        sign = Paragraph("<br/><br/><br/>( ............................................ )<br/>NIP. ...............................", center)
+        t = Table([[opts], [sign]], colWidths=[174 * mm])
+        t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94A3B8")), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4), ("LEFTPADDING", (0, 0), (-1, -1), 5)]))
+        return t
+    elems.append(section("VII. PERTIMBANGAN ATASAN LANGSUNG"))
+    elems.append(approval_block("atasan", approved))
+    elems.append(Spacer(1, 4))
+    elems.append(section("VIII. KEPUTUSAN PEJABAT YANG BERWENANG MEMBERIKAN CUTI"))
+    elems.append(approval_block("pejabat", approved))
     doc.build(elems)
     return buf.getvalue()
 
@@ -1609,8 +1691,54 @@ async def leave_pdf(leave_id: str, request: Request, auth: Optional[str] = Query
     if not lv:
         raise HTTPException(status_code=404, detail="Tidak ditemukan")
     emp = await db.users.find_one({"id": lv["employee_id"]}) or {}
-    return Response(content=_leave_pdf_bytes(lv, emp), media_type="application/pdf",
+    bal = await get_balance(lv["employee_id"])
+    approved = await db.leaves.find({"employee_id": lv["employee_id"], "status": "disetujui"}).to_list(2000)
+    counts = {}
+    for a in approved:
+        counts[a["jenis"]] = counts.get(a["jenis"], 0) + 1
+    return Response(content=_leave_pdf_bytes(lv, emp, bal, counts), media_type="application/pdf",
                     headers={"Content-Disposition": f"inline; filename=formulir-cuti-{leave_id[:8]}.pdf"})
+
+
+@api_router.post("/leaves/{leave_id}/attachment")
+async def upload_leave_attachment(leave_id: str, request: Request, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    lv = await db.leaves.find_one({"id": leave_id})
+    if not lv:
+        raise HTTPException(status_code=404, detail="Pengajuan cuti tidak ditemukan")
+    if not has_role(user, "admin") and lv["employee_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    if lv["status"] != "diajukan" and not has_role(user, "admin"):
+        raise HTTPException(status_code=400, detail="Lampiran hanya dapat diunggah sebelum cuti diverifikasi")
+    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "").lower()
+    if ext not in ALLOWED_EXT:
+        raise HTTPException(status_code=400, detail="Format file tidak diizinkan. Gunakan PDF, JPG, JPEG, atau PNG.")
+    data = await file.read()
+    if len(data) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="Ukuran file melebihi 2 MB.")
+    content_type = MIME_TYPES.get(ext, "application/octet-stream")
+    path = f"{APP_NAME}/leaves/{lv['employee_id']}/{uuid.uuid4()}.{ext}"
+    result = put_object(path, data, content_type)
+    await db.leaves.update_one({"id": leave_id}, {"$set": {
+        "lampiran_path": result["path"], "lampiran_filename": file.filename, "lampiran_content_type": content_type}})
+    await log_activity(user, f"Upload lampiran cuti {leave_id[:8]}", "Cuti", request)
+    return {"ok": True, "lampiran_filename": file.filename}
+
+
+@api_router.get("/leaves/{leave_id}/attachment")
+async def download_leave_attachment(leave_id: str, request: Request, auth: Optional[str] = Query(None)):
+    header = request.headers.get("Authorization", "")
+    token = header[7:] if header.startswith("Bearer ") else auth
+    if not token:
+        raise HTTPException(status_code=401, detail="Tidak terautentikasi")
+    try:
+        jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token tidak valid")
+    lv = await db.leaves.find_one({"id": leave_id})
+    if not lv or not lv.get("lampiran_path"):
+        raise HTTPException(status_code=404, detail="Lampiran tidak ditemukan")
+    data, ct = get_object(lv["lampiran_path"])
+    return Response(content=data, media_type=lv.get("lampiran_content_type", ct))
 
 
 # ----------------------------------------------------------------------------
@@ -1776,6 +1904,8 @@ async def startup():
     async for u in db.users.find({"roles": {"$exists": False}}):
         await db.users.update_one({"id": u["id"]}, {"$set": {
             "roles": [u.get("role", "pegawai")], "is_blud": u.get("is_blud", False)}})
+    async for u in db.users.find({"tipe_pegawai": {"$exists": False}}):
+        await db.users.update_one({"id": u["id"]}, {"$set": {"tipe_pegawai": "BLUD" if u.get("is_blud") else "ASN"}})
     from seed import seed_data
     await seed_data(db, hash_password)
 

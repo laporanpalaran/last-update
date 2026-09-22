@@ -43,13 +43,14 @@ async def seed_data(db, hash_password):
         for i, (nama, jab, unit) in enumerate(nakes, 1):
             users.append({"username": f"pegawai{i}", "nip": f"1990{i:02d}15 2015{i:02d} 1 00{i}",
                           "email": f"pegawai{i}@espak.id", "password": "pegawai123", "nama": nama,
-                          "role": "pegawai", "jabatan": jab, "unit": unit, "is_blud": True})
+                          "role": "pegawai", "jabatan": jab, "unit": unit, "is_blud": (i % 3 != 0)})
         for u in users:
             uroles = u.get("roles") or [u["role"]]
+            tipe = "BLUD" if u.get("is_blud") else "ASN"
             await db.users.insert_one({
                 "id": str(uuid.uuid4()), "username": u["username"], "nip": u["nip"], "email": u["email"],
                 "password_hash": hash_password(u["password"]), "nama": u["nama"],
-                "role": uroles[0], "roles": uroles, "is_blud": u.get("is_blud", False),
+                "role": uroles[0], "roles": uroles, "is_blud": u.get("is_blud", False), "tipe_pegawai": tipe,
                 "jabatan": u["jabatan"], "unit": u["unit"], "status": "aktif",
                 "created_at": now_iso(), "updated_at": now_iso(),
             })
@@ -101,11 +102,11 @@ async def seed_data(db, hash_password):
                     "target": 100, "satuan": "%", "status": "aktif", "created_at": now_iso(),
                 })
 
-    # ---- Saldo cuti awal untuk tenaga BLUD ----
+    # ---- Saldo cuti awal untuk pegawai (ASN & BLUD) ----
     if await db.leave_balances.count_documents({}) == 0:
         year = datetime.now(timezone.utc).year
-        blud = [u for u in all_users if u.get("is_blud")]
-        for i, u in enumerate(blud):
+        pegawai = [u for u in all_users if "pegawai" in (u.get("roles") or [u.get("role")])]
+        for i, u in enumerate(pegawai):
             await db.leave_balances.insert_one({
                 "id": str(uuid.uuid4()), "employee_id": u["id"], "tahun": year,
                 "saldo_n": 12, "saldo_n1": 6 if i % 2 == 0 else 0,
@@ -118,9 +119,9 @@ async def seed_data(db, hash_password):
         prof_map = {"Bidan": "SIPB", "Perawat": "SIPP", "Apoteker": "SIPA",
                     "Dokter Gigi": "SIPDG", "Nutrisionis": "SIP", "Sanitarian": "SIP",
                     "Analis Laboratorium": "SIP", "Penyuluh Kesehatan": "SIP"}
-        blud = [u for u in all_users if u.get("is_blud")]
+        pegawai = [u for u in all_users if "pegawai" in (u.get("roles") or [u.get("role")])]
         offsets = [400, 250, 60, -20, 800, 30, 500, 120, -5, 700]
-        for i, u in enumerate(blud):
+        for i, u in enumerate(pegawai):
             prof = u.get("jabatan", "Perawat")
             end = datetime.now(timezone.utc) + timedelta(days=offsets[i % len(offsets)])
             terbit = end - timedelta(days=1825)

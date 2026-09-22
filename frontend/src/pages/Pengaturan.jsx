@@ -8,7 +8,7 @@ import { toast } from "sonner";
 
 const inputCls = "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100";
 const ROLES = ["admin", "kepala", "pegawai", "pj_program"];
-const emptyUser = { username: "", nip: "", password: "", nama: "", roles: ["pegawai"], jabatan: "", unit: "", is_blud: false };
+const emptyUser = { username: "", nip: "", password: "", nama: "", roles: ["pegawai"], jabatan: "", unit: "", tipe_pegawai: "ASN" };
 
 function TargetTab() {
   const [s, setS] = useState({ target_jpl: 40, target_sertifikat: 8 });
@@ -36,7 +36,7 @@ function UsersTab() {
   useEffect(() => { load(); }, []);
 
   const openNew = () => { setEdit(null); setForm(emptyUser); setOpen(true); };
-  const openEdit = (u) => { setEdit(u); setForm({ ...u, password: "", roles: u.roles || (u.role ? [u.role] : ["pegawai"]), is_blud: !!u.is_blud }); setOpen(true); };
+  const openEdit = (u) => { setEdit(u); setForm({ ...u, password: "", roles: u.roles || (u.role ? [u.role] : ["pegawai"]), tipe_pegawai: u.tipe_pegawai || (u.is_blud ? "BLUD" : "ASN") }); setOpen(true); };
   const toggleRole = (r) => setForm((f) => { const has = f.roles.includes(r); const roles = has ? f.roles.filter((x) => x !== r) : [...f.roles, r]; return { ...f, roles }; });
   const save = async (e) => {
     e.preventDefault();
@@ -61,7 +61,7 @@ function UsersTab() {
                 <tr key={u.id} className="hover:bg-slate-50/60">
                   <td className="px-4 py-3"><p className="font-medium text-slate-800">{u.nama}</p><p className="text-xs text-slate-400">{u.jabatan}</p></td>
                   <td className="px-4 py-3"><p className="text-slate-600">{u.username}</p><p className="font-mono text-xs text-slate-400">{u.nip}</p></td>
-                  <td className="px-4 py-3"><div className="flex flex-col gap-1"><RolesBadges roles={u.roles || (u.role ? [u.role] : [])} />{u.is_blud && <span className="w-fit rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700">Tenaga BLUD</span>}</div></td>
+                  <td className="px-4 py-3"><div className="flex flex-col gap-1"><RolesBadges roles={u.roles || (u.role ? [u.role] : [])} /><span className={`w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${(u.tipe_pegawai || (u.is_blud ? "BLUD" : "ASN")) === "BLUD" ? "bg-teal-50 text-teal-700" : "bg-indigo-50 text-indigo-700"}`}>{u.tipe_pegawai || (u.is_blud ? "BLUD" : "ASN")}</span></div></td>
                   <td className="px-4 py-3 text-slate-500">{u.unit || "-"}</td>
                   <td className="px-4 py-3"><div className="flex gap-1.5"><button onClick={() => openEdit(u)} className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200"><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => del(u.id)} className="grid h-8 w-8 place-items-center rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100"><Trash2 className="h-3.5 w-3.5" /></button></div></td>
                 </tr>
@@ -93,10 +93,12 @@ function UsersTab() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <input placeholder="Unit" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className={inputCls} />
-              <label className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition ${form.is_blud ? "border-teal-400 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                <input type="checkbox" checked={form.is_blud} onChange={(e) => setForm({ ...form, is_blud: e.target.checked })} data-testid="u-blud" className="h-4 w-4 accent-teal-500" />
-                Tenaga BLUD
-              </label>
+              <div>
+                <select value={form.tipe_pegawai} onChange={(e) => setForm({ ...form, tipe_pegawai: e.target.value })} className={inputCls} data-testid="u-tipe">
+                  <option value="ASN">Pegawai ASN</option>
+                  <option value="BLUD">Tenaga BLUD</option>
+                </select>
+              </div>
             </div>
             <input placeholder="Jabatan" value={form.jabatan} onChange={(e) => setForm({ ...form, jabatan: e.target.value })} className={inputCls} />
             <DialogFooter><button type="button" onClick={() => setOpen(false)} className="rounded-xl border px-4 py-2 text-sm">Batal</button><button data-testid="u-submit" className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white">Simpan</button></DialogFooter>

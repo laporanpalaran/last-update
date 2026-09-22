@@ -5,7 +5,7 @@ import { PageHeader, Empty, Badge, hasRole } from "@/components/common";
 import { DatePicker } from "@/components/DatePicker";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { CalendarDays, Plus, Printer, Trash2, Check, X, Ban, Save, Wallet } from "lucide-react";
+import { CalendarDays, Plus, Printer, Trash2, Check, X, Ban, Save, Wallet, Upload, Paperclip } from "lucide-react";
 import { toast } from "sonner";
 
 const inputCls = "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100";
@@ -49,10 +49,25 @@ function daysBetween(a, b) {
   return Math.round((d2 - d1) / 86400000) + 1;
 }
 
-function LeaveForm({ form, setForm, onlyOwn = true, staff = [] }) {
+function LeaveForm({ form, setForm, onlyOwn = true, staff = [], balance = null }) {
   const jml = daysBetween(form.tanggal_mulai, form.tanggal_selesai);
+  const y = balance?.tahun || new Date().getFullYear();
   return (
     <div className="space-y-3">
+      {balance && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-3" data-testid="cuti-form-saldo">
+          <p className="mb-2 text-xs font-semibold text-slate-700">Sisa Saldo Cuti Anda (referensi)</p>
+          <div className="grid grid-cols-4 gap-2 text-center">
+            {[["Bersama", balance.saldo_bersama], [`N-2 (${y - 2})`, balance.saldo_n2], [`N-1 (${y - 1})`, balance.saldo_n1], [`N (${y})`, balance.saldo_n]].map(([lbl, v]) => (
+              <div key={lbl} className="rounded-lg bg-white px-2 py-1.5">
+                <p className="text-[10px] font-medium text-slate-500">{lbl}</p>
+                <p className="font-heading text-lg font-bold text-slate-900">{v ?? 0}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10px] text-slate-500">Pemakaian saldo: Cuti Bersama → N-2 → N-1 → N. (N = tahun berjalan)</p>
+        </div>
+      )}
       {!onlyOwn && (
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Pegawai</label>
@@ -85,9 +100,10 @@ function LeaveForm({ form, setForm, onlyOwn = true, staff = [] }) {
   );
 }
 
-function LeaveTable({ rows, showName, onDelete, onVerify, onCancel, isAdmin }) {
+function LeaveTable({ rows, showName, onDelete, onVerify, onCancel, onUpload, selfId, isAdmin }) {
   if (!rows.length) return <Empty text="Belum ada data cuti" />;
   const cetak = (id) => window.open(`${API}/leaves/${id}/pdf?auth=${token()}`, "_blank");
+  const lihatLampiran = (id) => window.open(`${API}/leaves/${id}/attachment?auth=${token()}`, "_blank");
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
       <div className="overflow-x-auto">
@@ -110,6 +126,13 @@ function LeaveTable({ rows, showName, onDelete, onVerify, onCancel, isAdmin }) {
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1.5">
                     <button title="Cetak / PDF" onClick={() => cetak(l.id)} data-testid={`cuti-print-${l.id}`} className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200"><Printer className="h-3.5 w-3.5" /></button>
+                    {l.has_lampiran && <button title="Lihat Lampiran" onClick={() => lihatLampiran(l.id)} data-testid={`cuti-lampiran-${l.id}`} className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100"><Paperclip className="h-3.5 w-3.5" /></button>}
+                    {onUpload && l.employee_id === selfId && l.status === "diajukan" && (
+                      <label title="Upload Lampiran" data-testid={`cuti-upload-${l.id}`} className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg bg-sky-50 text-sky-600 hover:bg-sky-100">
+                        <Upload className="h-3.5 w-3.5" />
+                        <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => { if (e.target.files?.[0]) onUpload(l, e.target.files[0]); e.target.value = ""; }} />
+                      </label>
+                    )}
                     {isAdmin && l.status === "diajukan" && <>
                       <button title="Setujui" onClick={() => onVerify(l, "disetujui")} data-testid={`cuti-approve-${l.id}`} className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100"><Check className="h-3.5 w-3.5" /></button>
                       <button title="Tolak" onClick={() => onVerify(l, "ditolak")} data-testid={`cuti-reject-${l.id}`} className="grid h-8 w-8 place-items-center rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100"><X className="h-3.5 w-3.5" /></button>
@@ -208,6 +231,7 @@ export default function Cuti() {
   };
   const cancel = async (l) => { if (!window.confirm("Batalkan cuti ini? Saldo akan dikembalikan bila sudah disetujui.")) return; try { await api.put(`/leaves/${l.id}/cancel`); toast.success("Cuti dibatalkan"); loadAdmin(); loadMine(); } catch (e) { toast.error(apiErr(e)); } };
   const del = async (l) => { if (!window.confirm("Hapus pengajuan?")) return; try { await api.delete(`/leaves/${l.id}`); loadMine(); loadAdmin(); } catch (e) { toast.error(apiErr(e)); } };
+  const upload = async (l, file) => { const fd = new FormData(); fd.append("file", file); try { await api.post(`/leaves/${l.id}/attachment`, fd); toast.success("Lampiran cuti berhasil diunggah"); loadMine(); loadAdmin(); } catch (e) { toast.error(apiErr(e)); } };
 
   return (
     <div className="space-y-6">
@@ -225,7 +249,8 @@ export default function Cuti() {
         <TabsContent value="saya" className="mt-4 space-y-5">
           <BalanceCards b={balance} />
           <h3 className="font-heading text-lg font-semibold text-slate-800">Riwayat Pengajuan Saya</h3>
-          <LeaveTable rows={mine} onDelete={del} />
+          <p className="-mt-3 text-xs text-slate-500">Unggah lampiran (surat/dokumen pendukung) pada pengajuan berstatus "Diajukan" sebelum diverifikasi.</p>
+          <LeaveTable rows={mine} onDelete={del} onUpload={upload} selfId={user.id} />
         </TabsContent>
 
         {isManager && (
@@ -240,7 +265,7 @@ export default function Cuti() {
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle className="font-heading">Ajukan Cuti</DialogTitle></DialogHeader>
-          <LeaveForm form={form} setForm={setForm} onlyOwn />
+          <LeaveForm form={form} setForm={setForm} onlyOwn balance={balance} />
           <DialogFooter><button onClick={() => setOpen(false)} className="rounded-xl border px-4 py-2 text-sm">Batal</button><button onClick={() => submit(false)} data-testid="cuti-submit" className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white">Kirim Pengajuan</button></DialogFooter>
         </DialogContent>
       </Dialog>
