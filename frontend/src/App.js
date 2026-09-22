@@ -19,6 +19,7 @@ import Laporan from "@/pages/Laporan";
 import Pengaturan from "@/pages/Pengaturan";
 import Roadmap from "@/pages/Roadmap";
 import Cuti from "@/pages/Cuti";
+import KonfigurasiCuti from "@/pages/KonfigurasiCuti";
 import SIP from "@/pages/SIP";
 import MonitoringSIP from "@/pages/MonitoringSIP";
 
@@ -71,6 +72,7 @@ function App() {
             <Route path="/policy-brief" element={<Protected roles={["admin", "kepala", "pj_program"]}><PolicyBrief /></Protected>} />
             <Route path="/laporan" element={<Protected roles={["admin", "kepala"]}><Laporan /></Protected>} />
             <Route path="/cuti" element={<Protected roles={["admin", "kepala", "pegawai", "pj_program"]}><Cuti /></Protected>} />
+            <Route path="/konfigurasi-cuti" element={<Protected roles={["admin"]}><KonfigurasiCuti /></Protected>} />
             <Route path="/sip" element={<Protected roles={["admin", "pegawai", "pj_program"]}><SIP /></Protected>} />
             <Route path="/monitoring-sip" element={<Protected roles={["admin", "kepala"]}><MonitoringSIP /></Protected>} />
             <Route path="/pengaturan" element={<Protected roles={["admin"]}><Pengaturan /></Protected>} />

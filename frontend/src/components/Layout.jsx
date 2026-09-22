@@ -6,7 +6,7 @@ import { ROLE_LABEL } from "@/components/common";
 import {
   LayoutDashboard, Users, Award, BadgeCheck, TrendingUp, ClipboardList, Activity,
   FileText, AlertTriangle, Settings, LogOut, Bell, Menu, X, Stethoscope, ListChecks,
-  BarChart3, ScrollText, Map, UserCircle, ChevronDown, CalendarDays, IdCard, ShieldCheck,
+  BarChart3, ScrollText, Map, UserCircle, ChevronDown, CalendarDays, IdCard, ShieldCheck, SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -36,7 +36,8 @@ const MENU = [
     { to: "/laporan", label: "Laporan & Export", icon: FileText, roles: ["admin", "kepala"] },
   ]},
   { section: "Kepegawaian BLUD", roles: ["admin", "kepala", "pegawai", "pj_program"], items: [
-    { to: "/cuti", label: "Cuti Pegawai", icon: CalendarDays, roles: ["admin", "kepala", "pegawai", "pj_program"] },
+    { to: "/cuti", label: "Cuti Pegawai", icon: CalendarDays, roles: ["admin", "kepala", "pegawai", "pj_program"], when: (u) => (u.roles || [u.role]).some((r) => ["admin", "kepala"].includes(r)) || u.is_blud },
+    { to: "/konfigurasi-cuti", label: "Konfigurasi Cuti", icon: SlidersHorizontal, roles: ["admin"] },
     { to: "/sip", label: "SIP Saya", icon: IdCard, roles: ["pegawai", "pj_program", "admin"] },
     { to: "/monitoring-sip", label: "Monitoring SIP", icon: ShieldCheck, roles: ["admin", "kepala"] },
   ]},
@@ -124,7 +125,7 @@ export default function Layout({ children }) {
         </div>
         <nav className="h-[calc(100vh-4rem)] overflow-y-auto px-3 py-4">
           {MENU.filter((g) => canSee(g.roles)).map((group) => {
-            const items = group.items.filter((it) => canSee(it.roles));
+            const items = group.items.filter((it) => canSee(it.roles) && (!it.when || it.when(user)));
             if (items.length === 0) return null;
             return (
               <div key={group.section} className="mb-4">

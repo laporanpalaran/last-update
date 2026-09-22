@@ -50,7 +50,7 @@ function daysBetween(a, b) {
   return Math.round((d2 - d1) / 86400000) + 1;
 }
 
-function LeaveForm({ form, setForm, onlyOwn = true, staff = [], balance = null }) {
+function LeaveForm({ form, setForm, onlyOwn = true, staff = [], balance = null, jenisList = JENIS }) {
   const jml = daysBetween(form.tanggal_mulai, form.tanggal_selesai);
   const y = balance?.tahun || new Date().getFullYear();
   return (
@@ -82,7 +82,7 @@ function LeaveForm({ form, setForm, onlyOwn = true, staff = [], balance = null }
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Jenis Cuti</label>
           <select value={form.jenis} onChange={(e) => setForm({ ...form, jenis: e.target.value })} className={inputCls} data-testid="cuti-jenis">
-            {JENIS.map((j) => <option key={j} value={j}>{j}</option>)}
+            {jenisList.map((j) => <option key={j} value={j}>{j}</option>)}
           </select>
         </div>
         <div>
@@ -202,17 +202,33 @@ export default function Cuti() {
   const { user } = useAuth();
   const isAdmin = hasRole(user, "admin");
   const isManager = hasRole(user, "admin", "kepala");
+  const canApply = isManager || user.is_blud;
   const [balance, setBalance] = useState(null);
   const [mine, setMine] = useState([]);
   const [all, setAll] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [jenisList, setJenisList] = useState(JENIS);
   const [open, setOpen] = useState(false);
   const [adminAdd, setAdminAdd] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
   const loadMine = useCallback(() => { api.get("/leave/my-balance").then((r) => setBalance(r.data)); api.get("/leaves").then((r) => setMine(r.data.filter((l) => l.employee_id === user.id))); }, [user.id]);
   const loadAdmin = useCallback(() => { if (isManager) { api.get("/leaves").then((r) => setAll(r.data)); api.get("/leave/balances").then((r) => setStaff(r.data)); } }, [isManager]);
-  useEffect(() => { loadMine(); loadAdmin(); }, [loadMine, loadAdmin]);
+  useEffect(() => { api.get("/leave/config").then((r) => setJenisList(r.data.jenis_cuti || JENIS)).catch(() => {}); }, []);
+  useEffect(() => { if (canApply) loadMine(); loadAdmin(); }, [loadMine, loadAdmin, canApply]);
+
+  if (!canApply) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Cuti Pegawai" desc="Modul pengelolaan cuti tenaga BLUD." />
+        <div className="grid place-items-center rounded-2xl border border-slate-200 bg-white p-12 text-center" data-testid="cuti-not-blud">
+          <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-400"><CalendarDays className="h-6 w-6" /></div>
+          <p className="font-heading text-lg font-semibold text-slate-800">Menu cuti khusus tenaga BLUD</p>
+          <p className="mt-1 max-w-md text-sm text-slate-500">Akun Anda berstatus ASN sehingga tidak memiliki akses pengajuan cuti pada modul ini. Hubungi admin bila status kepegawaian Anda perlu diperbarui.</p>
+        </div>
+      </div>
+    );
+  }
 
   const submit = async (behalf) => {
     try {
@@ -267,14 +283,14 @@ export default function Cuti() {
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle className="font-heading">Ajukan Cuti</DialogTitle></DialogHeader>
-          <LeaveForm form={form} setForm={setForm} onlyOwn balance={balance} />
+          <LeaveForm form={form} setForm={setForm} onlyOwn balance={balance} jenisList={jenisList} />
           <DialogFooter><button onClick={() => setOpen(false)} className="rounded-xl border px-4 py-2 text-sm">Batal</button><button onClick={() => submit(false)} data-testid="cuti-submit" className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white">Kirim Pengajuan</button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={adminAdd} onOpenChange={setAdminAdd}>
         <DialogContent className="max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle className="font-heading">Tambah Cuti Pegawai</DialogTitle></DialogHeader>
-          <LeaveForm form={form} setForm={setForm} onlyOwn={false} staff={staff} />
+          <LeaveForm form={form} setForm={setForm} onlyOwn={false} staff={staff} jenisList={jenisList} />
           <DialogFooter><button onClick={() => setAdminAdd(false)} className="rounded-xl border px-4 py-2 text-sm">Batal</button><button onClick={() => submit(true)} data-testid="admin-cuti-submit" className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Simpan & Setujui</button></DialogFooter>
         </DialogContent>
       </Dialog>

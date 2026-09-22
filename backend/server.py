@@ -1367,6 +1367,25 @@ async def backup_csv(dataset: str = Query("users"), user: dict = Depends(require
 # ----------------------------------------------------------------------------
 JENIS_CUTI = ["Tahunan", "Sakit"]
 BALANCE_ORDER = ["saldo_bersama", "saldo_n2", "saldo_n1", "saldo_n"]
+DEFAULT_LEAVE_CONFIG = {"default_saldo_n": 12, "default_saldo_bersama": 0, "jenis_cuti": ["Tahunan", "Sakit"]}
+
+
+class LeaveConfigInput(BaseModel):
+    default_saldo_n: float = 12
+    default_saldo_bersama: float = 0
+    jenis_cuti: List[str] = ["Tahunan", "Sakit"]
+    tahun: Optional[int] = None
+
+
+async def get_leave_config() -> dict:
+    c = await db.settings.find_one({"id": "leave"})
+    if not c:
+        c = {"id": "leave", **DEFAULT_LEAVE_CONFIG, "tahun": datetime.now(timezone.utc).year}
+        await db.settings.insert_one(dict(c))
+    return {"default_saldo_n": c.get("default_saldo_n", 12),
+            "default_saldo_bersama": c.get("default_saldo_bersama", 0),
+            "jenis_cuti": c.get("jenis_cuti") or ["Tahunan", "Sakit"],
+            "tahun": c.get("tahun", datetime.now(timezone.utc).year)}
 
 
 class LeaveInput(BaseModel):
@@ -1405,8 +1424,10 @@ def count_days(start: str, end: str) -> int:
 async def get_balance(emp_id: str) -> dict:
     b = await db.leave_balances.find_one({"employee_id": emp_id})
     if not b:
-        b = {"id": str(uuid.uuid4()), "employee_id": emp_id, "tahun": datetime.now(timezone.utc).year,
-             "saldo_n": 12, "saldo_n1": 0, "saldo_n2": 0, "saldo_bersama": 0, "updated_at": now_iso()}
+        cfg = await get_leave_config()
+        b = {"id": str(uuid.uuid4()), "employee_id": emp_id, "tahun": cfg["tahun"] or datetime.now(timezone.utc).year,
+             "saldo_n": cfg["default_saldo_n"], "saldo_n1": 0, "saldo_n2": 0,
+             "saldo_bersama": cfg["default_saldo_bersama"], "updated_at": now_iso()}
         await db.leave_balances.insert_one(dict(b))
     return b
 
@@ -1442,7 +1463,7 @@ async def leave_balances(user: dict = Depends(get_current_user)):
         if ly == year:
             used[l["employee_id"]] = used.get(l["employee_id"], 0) + l.get("jumlah_hari", 0)
     if has_role(user, "admin", "kepala"):
-        staff = await db.users.find({"roles": {"$in": ["pegawai", "pj_program"]}}).to_list(1000)
+        staff = await db.users.find({"roles": {"$in": ["pegawai", "pj_program"]}, "is_blud": True}).to_list(1000)
         out = []
         for s in staff:
             b = await get_balance(s["id"])
@@ -1480,6 +1501,38 @@ async def set_leave_balance(employee_id: str, data: BalanceInput, request: Reque
     return {"ok": True}
 
 
+@api_router.get("/leave/config")
+async def leave_config_get(user: dict = Depends(get_current_user)):
+    return await get_leave_config()
+
+
+@api_router.put("/leave/config")
+async def leave_config_put(data: LeaveConfigInput, request: Request, user: dict = Depends(require_roles("admin"))):
+    jenis = [j.strip() for j in data.jenis_cuti if j and j.strip()]
+    if not jenis:
+        jenis = ["Tahunan", "Sakit"]
+    upd = {"default_saldo_n": data.default_saldo_n, "default_saldo_bersama": data.default_saldo_bersama,
+           "jenis_cuti": jenis, "tahun": data.tahun or datetime.now(timezone.utc).year}
+    await db.settings.update_one({"id": "leave"}, {"$set": upd}, upsert=True)
+    await log_activity(user, "Ubah konfigurasi cuti pegawai", "Pengaturan", request)
+    return await get_leave_config()
+
+
+@api_router.post("/leave/config/apply")
+async def leave_config_apply(request: Request, user: dict = Depends(require_roles("admin"))):
+    cfg = await get_leave_config()
+    staff = await db.users.find({"roles": {"$in": ["pegawai", "pj_program"]}, "is_blud": True}).to_list(1000)
+    count = 0
+    for s in staff:
+        await get_balance(s["id"])
+        await db.leave_balances.update_one({"employee_id": s["id"]}, {"$set": {
+            "saldo_n": cfg["default_saldo_n"], "saldo_bersama": cfg["default_saldo_bersama"],
+            "tahun": cfg["tahun"], "updated_at": now_iso()}})
+        count += 1
+    await log_activity(user, f"Terapkan konfigurasi cuti ke {count} pegawai BLUD", "Pengaturan", request)
+    return {"ok": True, "updated": count}
+
+
 async def _leave_with_names(leaves):
     ids = list({l["employee_id"] for l in leaves})
     users = await db.users.find({"id": {"$in": ids}}).to_list(1000)
@@ -1513,7 +1566,8 @@ async def list_leaves(status: Optional[str] = None, employee_id: Optional[str] =
 
 @api_router.post("/leaves")
 async def create_leave(data: LeaveInput, request: Request, user: dict = Depends(get_current_user)):
-    if data.jenis not in JENIS_CUTI:
+    cfg = await get_leave_config()
+    if data.jenis not in cfg["jenis_cuti"]:
         raise HTTPException(status_code=400, detail="Jenis cuti tidak valid")
     is_admin = has_role(user, "admin")
     on_behalf = is_admin and data.employee_id and data.employee_id != user["id"]
