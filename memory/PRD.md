@@ -50,6 +50,18 @@ Web app responsif untuk Puskesmas Palaran untuk digitalisasi monitoring kinerja 
 ## Next Tasks
 - Tambah blok tanda tangan/QR pada PDF resmi.
 
+## Update 2026-06 (Import + Fitur Kepegawaian BLUD/ASN)
+Diimpor dari project user, di-setup ulang (env JWT_SECRET, EMERGENT_LLM_KEY, WEBHOOK_CRON_SECRET, ADMIN_*), deps backend+frontend terpasang, seed multi-role fresh.
+- **Multi-role**: user punya field `roles` (array); akses = gabungan role. Helper `roles_of`/`has_role`. Kelola via Pengaturan (checkbox role). Login token pakai role primer.
+- **Jenis pegawai**: field `tipe_pegawai` = "ASN" | "BLUD" (is_blud diturunkan otomatis). Dropdown di manajemen pengguna, badge di tabel. Seed: pegawai3/6/9 = ASN, sisanya BLUD.
+- **Cuti Pegawai** (`/cuti`): saldo N/N-1/N-2 + Cuti Bersama; prioritas potong saldo Bersama→N-2→N-1→N (apply_deduction). Pengajuan (pegawai), verifikasi/tolak & pembatalan + tambah cuti on-behalf (admin), atur saldo (admin). Dialog ajukan menampilkan referensi sisa saldo. Riwayat + cetak PDF.
+  - Endpoint: /api/leave/balances, /leave/my-balance, /leave/balances/{id}(PUT), /leaves(GET/POST), /leaves/{id}/verify|cancel|pdf, /leaves/{id}/attachment(POST/GET).
+  - **PDF resmi**: format "FORMULIR PERMINTAAN DAN PEMBERIAN CUTI" (I–VIII) termasuk V. CATATAN CUTI TAHUNAN (sisa saldo N-2/N-1/N + Cuti Bersama) & rekap jumlah pengambilan.
+  - **Lampiran cuti**: pegawai upload dokumen pendukung (PDF/JPG/PNG ≤2MB, Emergent Object Storage) hanya saat status "Diajukan" (sebelum verifikasi); admin bebas. Field has_lampiran.
+- **SIP** (`/sip` input pegawai + verifikasi admin; `/monitoring-sip` dashboard admin/kepala): status masa berlaku otomatis (Aktif / Akan Habis ≤90hr / Kadaluarsa), summary + distribusi per profesi + verifikasi.
+  - Endpoint: /api/sip(GET/POST), /sip/{id}(PUT/DELETE), /sip/{id}/verify, /sip/dashboard.
+- Testing: iteration_2 (multi-role/Cuti/SIP) 100%, iteration_3 (ASN/BLUD, sisa saldo, lampiran) backend 5/5 + frontend 100%.
+
 ## Update 2026-06 (fitur lanjutan)
 - **Analitik Pegawai** (`/analitik-pegawai`, admin & kepala): grafik Top 10 & 10 terendah JPL, rata-rata/median, perbandingan antar unit/program (bar ganda) + tabel per-unit. Endpoint `GET /api/analytics/employees`.
 - **Konektor Looker Studio**: endpoint dataset siap-sambung `GET /api/dataset/jpl` & `GET /api/dataset/spm` (JSON default, `?format=csv` untuk `IMPORTDATA`), auth via `?auth=<token>`. Halaman Laporan menampilkan URL JSON/CSV yang bisa disalin.
