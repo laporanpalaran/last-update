@@ -1,0 +1,29 @@
+{
+  "summary": "E-SPAK iteration 3 verified end-to-end. Backend pytest (test_iter3_features.py) 5/5 PASSED covering: (a) tipe_pegawai seed distribution — pegawai1..10 = exactly 3 ASN (pegawai3, pegawai6, pegawai9) + 7 BLUD as specified; (b) create user with tipe_pegawai=ASN persists (is_blud auto-derived false), update to BLUD persists (is_blud auto true); (c) leave attachment: upload PNG while status=diajukan ok, GET /leaves/{id}/attachment returns PNG bytes, ?auth=token variant works, has_lampiran + employee_tipe present on GET /leaves; after admin verify, pegawai upload → 400 as required, admin upload still allowed; (d) invalid extension (.exe) rejected 400; (e) official PDF: content-type application/pdf, %PDF- header, size > 1.5KB. Frontend Playwright: Pengaturan → Pengguna → 'Tambah Pengguna' modal shows u-tipe dropdown with options ['Pegawai ASN','Tenaga BLUD'] (checkbox BLUD replaced), u-role-admin/etc checkboxes still present; created TEST ASN user, toast 'Pengguna ditambahkan', table row shows ASN badge (indigo). Table shows correct badge distribution: 7 BLUD (teal) + 3 ASN (indigo) among pegawai1..10, matching pegawai3/pegawai6/pegawai9 = ASN. /cuti as pegawai1: 'Ajukan Cuti' opens dialog with cuti-form-saldo block displaying Bersama=3, N-2=3, N-1=6, N=12 plus priority hint; cuti-submit button present. Existing leave (status Dibatalkan) shows cuti-print + cuti-lampiran icons; cuti-upload correctly hidden (only appears when status=Diajukan) — behavior verified via backend test.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Beranda / PeriodeSelect (all pages)", "issues": ["Console hydration warning: <span> cannot be a child of <option> — visual-editing wrapper injects span inside <option>. Non-blocking dev-mode warning but noisy in console."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_features.py",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py now ~1916 lines — still well past the 700-line guideline. Recommend router split before adding more features (routers/users, routers/leaves, routers/sip, routers/spm).",
+    "POST /leaves/{id}/attachment returns {'ok': true, 'lampiran_filename': ...} instead of the updated leave object — inconsistent with other endpoints; UI has to refetch. Consider returning the updated leave.",
+    "Attachment upload allows admin to upload even after verify (correct), but there is no size/mime validation error message differentiation between MAX_FILE_SIZE and ALLOWED_EXT — both return 400 with different Indonesian messages (ok, but no error code)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter3_features.py", "/app/test_reports/iteration_3.json"],
+  "success_rate": {"backend": "100% (5/5 new + previous 10/10 still valid)", "frontend": "100% of iteration-3 targeted UI flows"},
+  "test_credentials": "admin/admin123, pegawai1/pegawai123, kepala/kepala123 — all working (login body key 'identifier').",
+  "seed_data_creation": "None persisted. Test artifacts (TEST_uiasn* user, TEST_ leaves) cleaned up.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 3 features (tipe_pegawai ASN/BLUD, leave attachment upload/download with status='diajukan' gate, official PDF form) all pass. New backend endpoints: POST /api/leaves/{id}/attachment (multipart 'file'), GET /api/leaves/{id}/attachment (Bearer or ?auth=token). GET /leaves rows now include has_lampiran + employee_tipe. UI testids: u-tipe (select), cuti-form-saldo (dialog block), cuti-upload-{id}, cuti-lampiran-{id}, cuti-print-{id}. Note: cuti-upload-* only rendered while leave.status='diajukan'.",
+  "rca of the issue": "No blockers. Only cosmetic hydration console warning on <select><option> due to visual editor wrapping — pre-existing across all pages, unrelated to this iteration."
+}
