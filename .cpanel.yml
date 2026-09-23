@@ -1,5 +1,5 @@
 ---
 deployment:
   tasks:
-    - export DEPLOYPATH=/home/ppia1912/public_html/
+    - export DEPLOYPATH=/home/ppia1912/public_html/puskesmaspalaran.my.id/
     - /bin/cp -R * $DEPLOYPATH
